@@ -1,5 +1,18 @@
+use bevy::{
+    prelude::*,
+    render::camera::ScalingMode,
+    sprite::collide_aabb::{collide, Collision},
+    sprite::MaterialMesh2dBundle,
+    time::common_conditions::on_timer,
+    utils::Duration,
+    window::{CursorGrabMode, PresentMode, WindowLevel},
+};
 use rand::prelude::*;
 use std::io;
+
+const WIDTH: usize = 10;
+const HEIGHT: usize = 10;
+const TIME_STEP: f32 = 1. / 9.;
 
 #[derive(Copy, Clone)]
 struct Cordinates {
@@ -8,8 +21,28 @@ struct Cordinates {
 }
 
 fn main() {
-    let mut row = vec![" "; 10];
-    let mut grid = vec![row; 10];
+    App::new()
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "I am a window!".into(),
+                present_mode: PresentMode::AutoVsync,
+                resizable: false,
+                ..default()
+            }),
+            ..default()
+        }))
+        .insert_resource(FixedTime::new_from_secs(10.0))
+        .add_systems(Startup, setup)
+        //.add_system(movement)
+        .add_system(movement.run_if(on_timer(Duration::from_secs_f32(TIME_STEP))))
+        .insert_resource(FixedTime::new_from_secs(5.0))
+        .add_system(key_press)
+        //.add_system(grid_name_later)
+        .add_system(check_for_collisions)
+        .run();
+
+    let mut row = vec![" "; WIDTH];
+    let mut grid = vec![row; HEIGHT];
     add_fruit(&mut grid);
     let mut x: i32 = 5;
     let mut y: i32 = 5;
@@ -36,7 +69,7 @@ fn main() {
             'h' => horizontal_direction -= 1,
             'k' => vertical_direction -= 1,
             'j' => vertical_direction += 1,
-            _ => (),
+            _ => continue,
         };
         grid[y as usize][x as usize] = " ";
         y += vertical_direction;
@@ -72,6 +105,173 @@ fn main() {
         );
         add_snake_to_grid(&body_part_cordinates, &mut grid);
         print_grid(&grid);
+    }
+}
+
+#[derive(Component)]
+struct Head {
+    x: i32,
+    y: i32,
+    last_cordinate_of_tail: Cordinates,
+    body_part_cordinates: Vec<Cordinates>,
+}
+
+#[derive(Component)]
+struct Tail;
+#[derive(Component)]
+struct Collider;
+
+#[derive(Event, Default)]
+struct CollisionEvent;
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    commands.spawn(Camera2dBundle { ..default() });
+
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(shape::Circle::new(25.).into()).into(),
+            material: materials.add(ColorMaterial::from(Color::PURPLE)),
+            transform: Transform::from_translation(Vec3::new(150., 150., 0.)),
+            ..default()
+        },
+        Collider,
+    ));
+    // geerate grid
+    for x in 0..WIDTH {
+        commands.spawn((SpriteBundle {
+            sprite: Sprite {
+                color: Color::rgb(0.25, 0.25, 0.75),
+                custom_size: Some(Vec2::new(3.0, 1000.0)),
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::new(x as f32 * 50.0, 0., 0.)),
+            ..default()
+        },));
+    }
+    // Rectangle
+    commands.spawn((
+        SpriteBundle {
+            sprite: Sprite {
+                color: Color::rgb(0.25, 0.25, 0.75),
+                custom_size: Some(Vec2::new(50.0, 50.0)),
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::new(50., 50., 0.)),
+            ..default()
+        },
+        Head {
+            x: 0,
+            y: 0,
+            last_cordinate_of_tail: Cordinates { x: 0, y: 0 },
+            body_part_cordinates: vec![],
+        },
+    ));
+}
+
+fn movement(fixed_time: Res<FixedTime>, mut query: Query<(&mut Transform, &mut Head)>) {
+    for (mut body_part, mut head) in query.iter_mut() {
+        head.last_cordinate_of_tail = Cordinates {
+            x: body_part.translation.x as usize,
+            y: body_part.translation.y as usize,
+        };
+        body_part.translation.x += head.x as f32 * 50.0;
+        if body_part.translation.x >= WIDTH as f32 * 50.0 {
+            body_part.translation.x = 0.0;
+        }
+        if body_part.translation.x < 0.0 {
+            body_part.translation.x = 50.0 * WIDTH as f32 - 50.0;
+        }
+        body_part.translation.y += head.y as f32 * 50.0;
+        if body_part.translation.y >= HEIGHT as f32 * 50.0 {
+            body_part.translation.y = 0.0;
+        }
+        if body_part.translation.y < 0.0 {
+            body_part.translation.y = 50.0 * HEIGHT as f32 - 50.0;
+        }
+    }
+}
+
+fn key_press(
+    keyboard_input: Res<Input<KeyCode>>,
+    mut query: Query<(&mut Transform, &mut Head, With<Head>)>,
+    time_step: Res<FixedTime>,
+) {
+    for (mut transform, mut head, _) in query.iter_mut() {
+        if head.x == 0 {
+            if keyboard_input.just_pressed(KeyCode::Left) {
+                head.y = 0;
+                head.x = -1;
+            }
+            if keyboard_input.just_pressed(KeyCode::Right) {
+                head.x = 1;
+                head.y = 0;
+            }
+        }
+        if head.y == 0 {
+            if keyboard_input.just_pressed(KeyCode::Up) {
+                head.y = 1;
+                head.x = 0;
+            }
+            if keyboard_input.just_pressed(KeyCode::Down) {
+                head.y = -1;
+                head.x = 0;
+            }
+        }
+    }
+}
+
+fn grid_name_later(mut query: Query<&Transform, &Head>) {
+    let row = vec![" "; WIDTH];
+    let mut grid = vec![row; HEIGHT];
+    for head in query.iter_mut() {
+        grid[(head.translation.y / 10.0) as usize][(head.translation.x / 10.0) as usize] = "#";
+    }
+    print_grid(&grid);
+}
+
+fn check_for_collisions(
+    mut commands: Commands,
+    collider_query: Query<(&Transform, Entity), With<Collider>>,
+    mut head_query: Query<(&Transform, &mut Head), With<Head>>,
+) {
+    let (head_transform, mut head) = head_query.single_mut();
+    let head_size = head_transform.scale.truncate();
+
+    for _ in &collider_query {
+        for (transform, entity) in collider_query.iter() {
+            let collision = collide(
+                head_transform.translation,
+                head_size,
+                transform.translation,
+                transform.scale.truncate(),
+            );
+            if let Some(collision) = collision {
+                println!("collide");
+                commands.entity(entity).despawn();
+                // head.body_part_cordinates.push(head.last_cordinate_of_tail);
+
+                commands.spawn((
+                    SpriteBundle {
+                        sprite: Sprite {
+                            color: Color::rgb(0.25, 0.25, 0.75),
+                            custom_size: Some(Vec2::new(50.0, 50.0)),
+                            ..default()
+                        },
+                        transform: Transform::from_translation(Vec3::new(
+                            head.last_cordinate_of_tail.y as f32,
+                            head.last_cordinate_of_tail.x as f32,
+                            0.,
+                        )),
+                        ..default()
+                    },
+                    Tail,
+                ));
+            }
+        }
     }
 }
 
