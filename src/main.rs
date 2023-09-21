@@ -1,11 +1,6 @@
 use bevy::{
-    prelude::*,
-    render::camera::ScalingMode,
-    sprite::collide_aabb::{collide, Collision},
-    sprite::MaterialMesh2dBundle,
-    time::common_conditions::on_timer,
-    utils::Duration,
-    window::{CursorGrabMode, PresentMode, WindowLevel},
+    prelude::*, sprite::collide_aabb::collide, sprite::MaterialMesh2dBundle,
+    time::common_conditions::on_timer, utils::Duration, window::PresentMode,
 };
 use rand::prelude::*;
 use std::io;
@@ -35,18 +30,19 @@ fn main() {
         .add_systems(Startup, setup)
         //.add_system(movement)
         .add_system(movement.run_if(on_timer(Duration::from_secs_f32(TIME_STEP))))
+        .add_system(move_body_parts)
         .insert_resource(FixedTime::new_from_secs(5.0))
         .add_system(key_press)
         //.add_system(grid_name_later)
         .add_system(check_for_collisions)
         .run();
 
-    let mut row = vec![" "; WIDTH];
+    let row = vec![" "; WIDTH];
     let mut grid = vec![row; HEIGHT];
     add_fruit(&mut grid);
     let mut x: i32 = 5;
     let mut y: i32 = 5;
-    let mut last_cordinate_of_tail = Cordinates { x: 0, y: 0 };
+    let last_cordinate_of_tail = Cordinates { x: 0, y: 0 };
     let mut body_part_cordinates = vec![Cordinates {
         x: x as usize,
         y: y as usize,
@@ -121,6 +117,11 @@ struct Tail;
 #[derive(Component)]
 struct Collider;
 
+#[derive(Component)]
+struct BodyPart {
+    id: usize,
+}
+
 #[derive(Event, Default)]
 struct CollisionEvent;
 
@@ -172,7 +173,11 @@ fn setup(
     ));
 }
 
-fn movement(fixed_time: Res<FixedTime>, mut query: Query<(&mut Transform, &mut Head)>) {
+fn movement(
+    _fixed_time: Res<FixedTime>,
+    mut query: Query<(&mut Transform, &mut Head)>,
+    body_part_query: Query<(&mut Transform, &BodyPart)>,
+) {
     for (mut body_part, mut head) in query.iter_mut() {
         head.last_cordinate_of_tail = Cordinates {
             x: body_part.translation.x as usize,
@@ -195,12 +200,53 @@ fn movement(fixed_time: Res<FixedTime>, mut query: Query<(&mut Transform, &mut H
     }
 }
 
+fn move_body_parts(
+    head_query: Query<&Transform, With<Head>>,
+    mut body_part_query: Query<(&mut Transform, &BodyPart)>,
+) {
+    let mut body_parts = vec![];
+    let mut how_many_body_parts = 0;
+    for (_, body_part) in body_part_query.iter() {
+        if body_part.id > how_many_body_parts {
+            how_many_body_parts = body_part.id;
+        }
+    }
+    for (transform, body_part) in body_part_query.iter_mut() {
+        if body_parts.len() == 0 {
+            body_parts = vec![
+                Transform {
+                    translation: Vec3 {
+                        x: 1.0,
+                        y: 1.0,
+                        z: 1.0,
+                    },
+                    rotation: Quat::from_array([1.0, 1.0, 1.0, 1.0]),
+                    scale: Vec3 {
+                        x: 1.0,
+                        y: 1.0,
+                        z: 1.0,
+                    },
+                };
+                how_many_body_parts
+            ];
+        }
+        body_parts[body_part.id].translation.x = transform.translation.x;
+        body_parts[body_part.id].translation.y = transform.translation.y;
+    }
+    for index in (1..body_parts.len()).rev() {
+        body_parts[index] = body_parts[index - 1];
+    }
+    let head = head_query.single();
+    body_parts[0].translation.x = head.translation.x;
+    body_parts[0].translation.y = head.translation.y;
+}
+
 fn key_press(
     keyboard_input: Res<Input<KeyCode>>,
     mut query: Query<(&mut Transform, &mut Head, With<Head>)>,
-    time_step: Res<FixedTime>,
+    _time_step: Res<FixedTime>,
 ) {
-    for (mut transform, mut head, _) in query.iter_mut() {
+    for (_transform, mut head, _) in query.iter_mut() {
         if head.x == 0 {
             if keyboard_input.just_pressed(KeyCode::Left) {
                 head.y = 0;
@@ -237,9 +283,14 @@ fn check_for_collisions(
     mut commands: Commands,
     collider_query: Query<(&Transform, Entity), With<Collider>>,
     mut head_query: Query<(&Transform, &mut Head), With<Head>>,
+    body_part_query: Query<Entity, With<BodyPart>>,
 ) {
-    let (head_transform, mut head) = head_query.single_mut();
+    let (head_transform, head) = head_query.single_mut();
     let head_size = head_transform.scale.truncate();
+    let mut number_of_body_parts = 0;
+    for _ in body_part_query.iter() {
+        number_of_body_parts += 1;
+    }
 
     for _ in &collider_query {
         for (transform, entity) in collider_query.iter() {
@@ -249,7 +300,7 @@ fn check_for_collisions(
                 transform.translation,
                 transform.scale.truncate(),
             );
-            if let Some(collision) = collision {
+            if let Some(_collision) = collision {
                 println!("collide");
                 commands.entity(entity).despawn();
                 // head.body_part_cordinates.push(head.last_cordinate_of_tail);
@@ -269,6 +320,9 @@ fn check_for_collisions(
                         ..default()
                     },
                     Tail,
+                    BodyPart {
+                        id: number_of_body_parts + 1,
+                    },
                 ));
             }
         }
