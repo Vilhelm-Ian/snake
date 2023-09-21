@@ -176,7 +176,7 @@ fn setup(
 fn movement(
     _fixed_time: Res<FixedTime>,
     mut query: Query<(&mut Transform, &mut Head)>,
-    body_part_query: Query<(&mut Transform, &BodyPart)>,
+    _body_part_query: Query<(&mut Transform, &BodyPart)>,
 ) {
     for (mut body_part, mut head) in query.iter_mut() {
         head.last_cordinate_of_tail = Cordinates {
