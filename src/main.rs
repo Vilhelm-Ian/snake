@@ -75,7 +75,17 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    commands.spawn(Camera2dBundle { ..default() });
+    commands.spawn(Camera2dBundle {
+        transform: Transform {
+            translation: Vec3 {
+                x: 400.0,
+                y: 250.0,
+                z: 0.0,
+            },
+            ..default()
+        },
+        ..default()
+    });
 
     commands.spawn((
         MaterialMesh2dBundle {
