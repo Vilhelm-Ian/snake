@@ -1,12 +1,13 @@
-use bevy::{
-    prelude::*, sprite::collide_aabb::collide, sprite::MaterialMesh2dBundle,
-    time::common_conditions::on_timer, utils::Duration, window::PresentMode,
-};
+use bevy::{prelude::*, sprite::MaterialMesh2dBundle, window::PresentMode};
 use rand::prelude::*;
-use std::io;
 
 const WIDTH: usize = 10;
 const HEIGHT: usize = 10;
+
+const SCOREBOARD_FONT_SIZE: f32 = 40.0;
+const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
+const SCORE_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
+const TEXT_COLOR: Color = Color::rgb(0.5, 0.5, 1.0);
 
 fn main() {
     App::new()
@@ -14,15 +15,21 @@ fn main() {
             primary_window: Some(Window {
                 title: "I am a window!".into(),
                 present_mode: PresentMode::AutoVsync,
-                resizable: false,
                 ..default()
             }),
             ..default()
         }))
         .insert_resource(FixedTime::new_from_secs(1.0 / 10.0))
+        .insert_resource(Scoreboard { score: 0 })
+        .insert_resource(Cordinates { x: 1, y: 1 })
+        .insert_resource(Direction { x: 0, y: 0 })
+        .insert_resource(GameOver { state: false })
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (despawn_head, spawn_head, update_cordinates)) //change to fixed update later
-        .add_systems(Update, (movement)) //change to fixed update later
+        .add_systems(
+            FixedUpdate,
+            (despawn_head, ball_eaten, spawn_head, update_cordinates),
+        ) //change to fixed update later
+        .add_systems(Update, (movement, check_collision, update_scoreboard)) //change to fixed update later
         .run();
 }
 
@@ -36,23 +43,32 @@ struct Ball {
 struct BodyPart {
     id: usize,
 }
-#[derive(Component, Clone, Copy)]
+#[derive(Resource, Clone, Copy)]
 struct Cordinates {
     x: i32,
     y: i32,
 }
 
-#[derive(Component)]
+#[derive(Resource)]
 struct Direction {
     x: i32,
     y: i32,
 }
-
 #[derive(Event)]
 struct BallEaten;
 
+#[derive(Resource)]
+struct GameOver {
+    state: bool,
+}
+
 #[derive(Event, Default)]
 struct CollisionEvent;
+
+#[derive(Resource)]
+struct Scoreboard {
+    score: usize,
+}
 
 fn setup(
     mut commands: Commands,
@@ -70,18 +86,6 @@ fn setup(
         },
         Ball { x: 3, y: 3 },
     ));
-    // geerate grid
-    for x in 0..WIDTH {
-        commands.spawn((SpriteBundle {
-            sprite: Sprite {
-                color: Color::rgb(0.25, 0.25, 0.75),
-                custom_size: Some(Vec2::new(3.0, 1000.0)),
-                ..default()
-            },
-            transform: Transform::from_translation(Vec3::new(x as f32 * 50.0, 0., 0.)),
-            ..default()
-        },));
-    }
     // Rectangle
     commands.spawn((
         SpriteBundle {
@@ -95,11 +99,34 @@ fn setup(
         },
         BodyPart { id: 0 },
     ));
-    commands.spawn((Cordinates { x: 1, y: 1 }, Direction { x: 0, y: 0 }));
+
+    // Scoreboard
+    commands.spawn(
+        TextBundle::from_sections([
+            TextSection::new(
+                "Score: ",
+                TextStyle {
+                    font_size: SCOREBOARD_FONT_SIZE,
+                    color: TEXT_COLOR,
+                    ..default()
+                },
+            ),
+            TextSection::from_style(TextStyle {
+                font_size: SCOREBOARD_FONT_SIZE,
+                color: SCORE_COLOR,
+                ..default()
+            }),
+        ])
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: SCOREBOARD_TEXT_PADDING,
+            left: SCOREBOARD_TEXT_PADDING,
+            ..default()
+        }),
+    );
 }
 
-fn movement(mut cordinates: Query<(&mut Direction)>, keyboard_input: Res<Input<KeyCode>>) {
-    let mut direction = cordinates.single_mut();
+fn movement(mut direction: ResMut<Direction>, keyboard_input: Res<Input<KeyCode>>) {
     if keyboard_input.just_pressed(KeyCode::Left) && direction.x != 1 {
         direction.x = -1;
         direction.y = 0;
@@ -121,21 +148,21 @@ fn movement(mut cordinates: Query<(&mut Direction)>, keyboard_input: Res<Input<K
 fn despawn_head(
     mut commands: Commands,
     mut body_part_query: Query<(Entity, &mut BodyPart)>,
-    ball_query: Query<(&Ball, Entity)>,
 
-    cordinates_query: Query<&Cordinates>,
+    ball_query: Query<&Ball>,
+    cordinates: Res<Cordinates>,
+    game_over: Res<GameOver>,
 ) {
-    let (ball, ball_entity) = ball_query.single();
-    let cordinates = cordinates_query.single();
-    if ball.x == cordinates.x && ball.y == cordinates.y {
-        commands.entity(ball_entity).despawn();
+    if game_over.state {
         return;
     }
-
+    let ball = ball_query.single();
+    if ball.x == cordinates.x && ball.y == cordinates.y {
+        return;
+    }
     for (body_entity, mut body_part) in body_part_query.iter_mut() {
         if body_part.id == 0 {
             commands.entity(body_entity).despawn();
-            println!("despawning")
         } else {
             body_part.id -= 1;
         }
@@ -145,9 +172,12 @@ fn despawn_head(
 fn spawn_head(
     mut commands: Commands,
     body_part_query: Query<(Entity, &BodyPart)>,
-    cordinates_query: Query<&mut Cordinates>,
+    cordinates: Res<Cordinates>,
+    game_over: Res<GameOver>,
 ) {
-    let cordinates = cordinates_query.single();
+    if game_over.state {
+        return;
+    }
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
@@ -168,8 +198,7 @@ fn spawn_head(
     ));
 }
 
-fn update_cordinates(mut cordinates_query: Query<(&mut Cordinates, &Direction)>) {
-    let (mut cordinates, direction) = cordinates_query.single_mut();
+fn update_cordinates(mut cordinates: ResMut<Cordinates>, direction: Res<Direction>) {
     cordinates.x += direction.x;
     cordinates.y += direction.y;
     if cordinates.y > HEIGHT as i32 {
@@ -189,19 +218,20 @@ fn update_cordinates(mut cordinates_query: Query<(&mut Cordinates, &Direction)>)
 fn ball_eaten(
     mut commands: Commands,
     ball_query: Query<(&Ball, Entity)>,
-    cordinates_query: Query<&Cordinates>,
-    body_part_query: Query<(&Transform, With<BodyPart>)>,
+    cordinates: Res<Cordinates>,
+    body_part_query: Query<&Transform, With<BodyPart>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut scoreboard: ResMut<Scoreboard>,
 ) {
     let (ball, ball_entity) = ball_query.single();
-    let cordinates = cordinates_query.single();
     if ball.x == cordinates.x && ball.y == cordinates.y {
         commands.entity(ball_entity).despawn();
         let empty_cordinates = get_empty_cordinates(body_part_query);
         let mut rng = thread_rng();
         let n: usize = rng.gen_range(0..empty_cordinates.len());
         let cordinate = empty_cordinates[n];
+        scoreboard.score += 1;
 
         commands.spawn((
             MaterialMesh2dBundle {
@@ -222,11 +252,11 @@ fn ball_eaten(
     }
 }
 
-fn get_empty_cordinates(body_part_query: Query<(&Transform, With<BodyPart>)>) -> Vec<Cordinates> {
+fn get_empty_cordinates(body_part_query: Query<&Transform, With<BodyPart>>) -> Vec<Cordinates> {
     let mut cordinates = vec![];
-    for y in 0..HEIGHT {
+    for y in 0..=HEIGHT {
         cordinates.push(vec![]);
-        for x in 0..WIDTH {
+        for x in 0..=WIDTH {
             let len = cordinates.len();
             cordinates[len - 1].push(Cordinates {
                 x: x as i32,
@@ -234,9 +264,9 @@ fn get_empty_cordinates(body_part_query: Query<(&Transform, With<BodyPart>)>) ->
             });
         }
     }
-    for (body_part, _) in body_part_query.iter() {
-        let y = body_part.translation.y as usize;
-        let x = body_part.translation.x as usize;
+    for body_part in body_part_query.iter() {
+        let y = (body_part.translation.y / 50.) as usize;
+        let x = (body_part.translation.x / 50.) as usize;
         cordinates[y][x] = Cordinates { x: -1, y: -1 }
     }
     let result: Vec<Cordinates> = cordinates
@@ -245,4 +275,27 @@ fn get_empty_cordinates(body_part_query: Query<(&Transform, With<BodyPart>)>) ->
         .filter(|cordinate| cordinate.x != -1)
         .collect();
     result
+}
+
+fn check_collision(
+    body_part_query: Query<(&BodyPart, &Transform)>,
+    mut game_over: ResMut<GameOver>,
+) {
+    let len = body_part_query.into_iter().len();
+    for (body_part, transform) in body_part_query.iter() {
+        if body_part.id == len - 1 {
+            let head = transform.translation;
+            for (body_part, transform) in body_part_query.iter() {
+                if body_part.id != len - 1 && transform.translation == head {
+                    game_over.state = true;
+                }
+            }
+            break;
+        }
+    }
+}
+
+fn update_scoreboard(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
+    let mut text = query.single_mut();
+    text.sections[1].value = scoreboard.score.to_string();
 }
