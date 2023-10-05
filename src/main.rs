@@ -2,6 +2,7 @@ use bevy::{prelude::*, sprite::MaterialMesh2dBundle, window::PresentMode};
 use rand::prelude::*;
 
 const WIDTH: usize = 10;
+
 const HEIGHT: usize = 10;
 
 const SCOREBOARD_FONT_SIZE: f32 = 40.0;
@@ -43,7 +44,7 @@ struct Ball {
 struct BodyPart {
     id: usize,
 }
-#[derive(Resource, Clone, Copy)]
+#[derive(Resource, Clone, Copy, PartialEq)]
 struct Cordinates {
     x: i32,
     y: i32,
@@ -308,4 +309,27 @@ fn check_collision(
 fn update_scoreboard(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
     let mut text = query.single_mut();
     text.sections[1].value = scoreboard.score.to_string();
+}
+
+#[test]
+fn bottom_left_empty() {
+    let mut app = App::new();
+    app.world.spawn((
+        SpriteBundle {
+            sprite: Sprite {
+                color: Color::rgb(0.25, 0.25, 0.75),
+                custom_size: Some(Vec2::new(50.0, 50.0)),
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::new(0., 0., 0.)),
+            ..default()
+        },
+        BodyPart { id: 0 },
+    ));
+    app.add_systems(Update, find_cordinates);
+    fn find_cordinates(body_part_query: Query<&Transform, With<BodyPart>>) {
+        let empty_cordinates = get_empty_cordinates(body_part_query);
+        assert!(!empty_cordinates.contains(&Cordinates { x: 0, y: 0 }));
+    }
+    app.update();
 }
