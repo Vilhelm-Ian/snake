@@ -24,13 +24,13 @@ fn main() {
         .insert_resource(Scoreboard { score: 0 })
         .insert_resource(Cordinates { x: 1, y: 1 })
         .insert_resource(Direction { x: 0, y: 0 })
-        .insert_resource(GameOver { state: false })
         .add_systems(Startup, setup)
         .add_systems(
             FixedUpdate,
-            (despawn_head, ball_eaten, spawn_head, update_cordinates),
+            (despawn_head, ball_eaten, spawn_head, update_cordinates)
+                .run_if(not(resource_exists::<GameOver>())),
         ) //change to fixed update later
-        .add_systems(Update, (movement, check_collision, update_scoreboard)) //change to fixed update later
+        .add_systems(Update, (movement, check_collision, update_scoreboard))
         .run();
 }
 
@@ -59,9 +59,7 @@ struct Direction {
 struct BallEaten;
 
 #[derive(Resource)]
-struct GameOver {
-    state: bool,
-}
+struct GameOver;
 
 #[derive(Event, Default)]
 struct CollisionEvent;
@@ -162,11 +160,7 @@ fn despawn_head(
 
     ball_query: Query<&Ball>,
     cordinates: Res<Cordinates>,
-    game_over: Res<GameOver>,
 ) {
-    if game_over.state {
-        return;
-    }
     let ball = ball_query.single();
     if ball.x == cordinates.x && ball.y == cordinates.y {
         return;
@@ -184,11 +178,7 @@ fn spawn_head(
     mut commands: Commands,
     body_part_query: Query<(Entity, &BodyPart)>,
     cordinates: Res<Cordinates>,
-    game_over: Res<GameOver>,
 ) {
-    if game_over.state {
-        return;
-    }
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
@@ -288,17 +278,14 @@ fn get_empty_cordinates(body_part_query: Query<&Transform, With<BodyPart>>) -> V
     result
 }
 
-fn check_collision(
-    body_part_query: Query<(&BodyPart, &Transform)>,
-    mut game_over: ResMut<GameOver>,
-) {
+fn check_collision(body_part_query: Query<(&BodyPart, &Transform)>, mut commands: Commands) {
     let len = body_part_query.into_iter().len();
     for (body_part, transform) in body_part_query.iter() {
         if body_part.id == len - 1 {
             let head = transform.translation;
             for (body_part, transform) in body_part_query.iter() {
                 if body_part.id != len - 1 && transform.translation == head {
-                    game_over.state = true;
+                    commands.insert_resource(GameOver)
                 }
             }
             break;
